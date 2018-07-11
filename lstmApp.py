@@ -22,6 +22,7 @@ from numpy import concatenate
 from pandas import read_csv
 from pandas import DataFrame
 from pandas import concat
+import argparse
 pd.options.display.max_columns = 999
 y_name = 'CategoricalIncrease'
 WEEKLY_TRAIN_PATH   = "data/btcpricetrainingdataweekly2.csv"
@@ -33,6 +34,16 @@ HR12_TEST_PATH      = "data/btcpricetestingdata12hr2.csv"
 CSV_COLUMN_NAMES = list((pd.read_csv(HR12_TEST_PATH)).columns.values)
 CSV_COLUMN_NAMES[0]="Index"
 CATEGORICALINCREASE = ['NoIncreaseMoreThanTol', 'IncreaseMoreThanTol']
+parser = argparse.ArgumentParser(description='Specify LSTM hyperparameters')
+parser.add_argument('-layers', metavar='L', type=int, nargs='+', default=2,
+                   help='Number of LSTM layers')
+parser.add_argument('-layer_size', metavar='S', type=int, nargs='+', default=75,
+                   help='Integer value for the size (numer of neurons) of each LSTM layer')
+parser.add_argument('-epochs', metavar='E', type=int, nargs='+', default=250,
+                   help="Number of epochs to train")
+parser.add_argument('-batch_size', metavar='B', type=int, nargs='+', default=16,
+                   help='Batch size to train on')
+args = parser.parse_args()
 
 def series_to_supervised(data, n_in=1, n_out=1, dropnan=True):
 	n_vars = 1 if type(data) is list else data.shape[1]
@@ -108,11 +119,16 @@ def main(argv):
 	train_y = [int(y) for y in train_y]
 	with tf.device('gpu:0'):
 		model1 = Sequential()
-		model1.add(LSTM(512, input_shape=(train_X.shape[1], train_X.shape[2]),activation='relu',return_sequences=True))
-		model1.add(LSTM(256,activation='relu'))
+		if args.layers==1:
+			model1.add(LSTM(args.layer_size, input_shape=(train_X.shape[1], train_X.shape[2]),activation='relu'))
+		elif args.layers>1:
+			model1.add(LSTM(args.layer_size, input_shape=(train_X.shape[1], train_X.shape[2]),activation='relu',return_sequences=True))
+			for i in range(args.layers-1):
+				model1.add(LSTM(args.layer_size,activation='relu',return_sequences=True))
+			model1.add(LSTM(args.layer_size,activation='relu'))
 		model1.add(Dense(1))
 		model1.compile(loss='mae', optimizer='adam')
-		hist = model1.fit(train_X, train_y, epochs=500, batch_size=16, class_weight={0:1,2:3},sample_weight=trainWeights,validation_data=(test_X, test_y), verbose=1, shuffle=False).history
+		hist = model1.fit(train_X, train_y, epochs=args.epochs, batch_size=args.batch_size, class_weight={0:1,1:3},sample_weight=trainWeights,validation_data=(test_X, test_y), verbose=1, shuffle=False).history
 		# make a prediction
 		yhat = model1.predict_classes(x=test_X)
 		numberOf1s,numberOf0s = 	0,0
@@ -126,7 +142,7 @@ def main(argv):
 		close = dataset["Close"].tolist()
 		close = close[n_train_hours:]
 		for i in range(len(yh)):
-			if yh[i][0]>0.01:
+			if yh[i][0]!=0:
 				if y[i]==0:
 					falseFlags1+=1
 					if i<len(y)-1:
